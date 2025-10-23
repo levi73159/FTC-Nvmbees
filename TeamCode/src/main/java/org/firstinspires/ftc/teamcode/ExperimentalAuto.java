@@ -59,7 +59,6 @@ import com.qualcomm.robotcore.util.ElapsedTime;
  */
 
 @Autonomous(name = "ExperimentalAuto")
-//@Disabled
 public class ExperimentalAuto extends OpMode {
     final double FEED_TIME_SECONDS = 0.05; //The feeder servos run this long when a shot is requested.
     final double STOP_SPEED = 0.0; //We send this power to the servos when we want them to stop.
