@@ -33,8 +33,8 @@
 package org.firstinspires.ftc.teamcode;
 
 import static com.qualcomm.robotcore.hardware.DcMotor.ZeroPowerBehavior.BRAKE;
-import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 
+import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
@@ -58,13 +58,13 @@ import com.qualcomm.robotcore.util.ElapsedTime;
  * we will also need to adjust the "PIDF" coefficients with some that are a better fit for our application.
  */
 
-@Autonomous(name = "ExperimentalAuto")
-public class ExperimentalAuto extends OpMode {
-    final double FEED_TIME_SECONDS = 0.05; //The feeder servos run this long when a shot is requested.
+@Autonomous(name = "Shoot Auto")
+public class ShootAuto extends OpMode {
+    final double FEED_TIME_NS = 100; //The feeder servos run this long when a shot is requested.
     final double STOP_SPEED = 0.0; //We send this power to the servos when we want them to stop.
-    final double FULL_SPEED = 0.6;
+    final double FULL_SPEED = 1;
 
-    final double DRIVE_TIME_SECONDS = 0.1;
+    final double DRIVE_TIME_SECONDS = 4;
     
     final double SPIN_SPEED = 1;
     final double SPIN_TIME_SECONDS = 1;
@@ -131,6 +131,7 @@ public class ExperimentalAuto extends OpMode {
     double axis = 1.0;
     
     private boolean isRed = true;
+    private boolean startShoot = true;
 
     /*
      * Code to run ONCE when the driver hits INIT
@@ -145,8 +146,8 @@ public class ExperimentalAuto extends OpMode {
          * to 'get' must correspond to the names assigned during the robot configuration
          * step.
          */
-        leftDrive = hardwareMap.get(DcMotor.class, "left_drive");
-        rightDrive = hardwareMap.get(DcMotor.class, "right_drive");
+        leftDrive = hardwareMap.get(DcMotor.class, "backLeftMotor");
+        rightDrive = hardwareMap.get(DcMotor.class, "backRightMotor");
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
         leftFeeder = hardwareMap.get(CRServo.class, "left_feeder");
         rightFeeder = hardwareMap.get(CRServo.class, "right_feeder");
@@ -206,12 +207,25 @@ public class ExperimentalAuto extends OpMode {
     public void init_loop() {
         telemetry.addData("Press A", "For Blue");
         telemetry.addData("Press B", "For Red");
+        telemetry.addData("Press X", "For start shoot");
+        telemetry.addData("Press Y", "For start move");
         telemetry.addData("Current Selected", isRed ? "RED" : "BLUE");
+        telemetry.addData("Start shoot", startShoot);
+
+        if (startShoot) {
+            autoState = AutoState.Shoot;
+        } else {
+            autoState = AutoState.Move;
+        }
         
         if (gamepad1.b) {
             isRed = true;
         } else if (gamepad1.a) {
             isRed = false;
+        } else if (gamepad1.x) {
+            startShoot = true;
+        } else if (gamepad1.y) {
+            startShoot = false;
         }
     }
 
@@ -256,7 +270,8 @@ public class ExperimentalAuto extends OpMode {
                  else
                     autoState = AutoState.Stop;
             case Stop:
-                // do nothing
+                leftDrive.setPower(0);
+                rightDrive.setPower(0);
                 break;
         }
 
@@ -327,11 +342,12 @@ public class ExperimentalAuto extends OpMode {
                 launchState = LaunchState.LAUNCHING;
                 break;
             case LAUNCHING:
-                if (feederTimer.seconds() > FEED_TIME_SECONDS) {
+                if (feederTimer.nanoseconds() > FEED_TIME_NS) {
                     launchState = LaunchState.IDLE;
                     leftFeeder.setPower(STOP_SPEED);
                     rightFeeder.setPower(STOP_SPEED);
                     shootCount++;
+                    feederTimer.reset();
                 }
                 break;
         }

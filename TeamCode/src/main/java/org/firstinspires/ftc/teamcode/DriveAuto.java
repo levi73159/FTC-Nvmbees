@@ -33,9 +33,9 @@
 package org.firstinspires.ftc.teamcode;
 
 import static com.qualcomm.robotcore.hardware.DcMotor.ZeroPowerBehavior.BRAKE;
+import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
-import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
@@ -58,12 +58,16 @@ import com.qualcomm.robotcore.util.ElapsedTime;
  * we will also need to adjust the "PIDF" coefficients with some that are a better fit for our application.
  */
 
-@TeleOp(name = "StarterBotTeleopMecanums", group = "StarterBot")
-//@Disabled
-public class StarterBotTeleopMecanums extends OpMode {
-    final double FEED_TIME_SECONDS = 0.20; //The feeder servos run this long when a shot is requested.
+@Autonomous(name = "Drive Auto")
+public class DriveAuto extends OpMode {
+    final double FEED_TIME_SECONDS = 0.005; //The feeder servos run this long when a shot is requested.
     final double STOP_SPEED = 0.0; //We send this power to the servos when we want them to stop.
-    final double FULL_SPEED = 1.0;
+    final double FULL_SPEED = 1;
+
+    final double DRIVE_TIME_SECONDS = 2;
+    
+    final double SPIN_SPEED = 1;
+    final double SPIN_TIME_SECONDS = 1;
 
     /*
      * When we control our launcher motor, we are using encoders. These allow the control system
@@ -71,19 +75,20 @@ public class StarterBotTeleopMecanums extends OpMode {
      * velocity. Here we are setting the target, and minimum velocity that the launcher should run
      * at. The minimum velocity is a threshold for determining when to fire.
      */
-    final double LAUNCHER_TARGET_VELOCITY = 1315;
-    final double LAUNCHER_MIN_VELOCITY = 1115;
+    double LAUNCHER_TARGET_VELOCITY = 1221;
+    double LAUNCHER_MIN_VELOCITY = 970;
 
     // Declare OpMode members.
-    private DcMotor leftFrontDrive = null;
-    private DcMotor rightFrontDrive = null;
-    private DcMotor leftBackDrive = null;
-    private DcMotor rightBackDrive = null;
+    private DcMotor leftDrive = null;
+    private DcMotor rightDrive = null;
     private DcMotorEx launcher = null;
     private CRServo leftFeeder = null;
     private CRServo rightFeeder = null;
 
     ElapsedTime feederTimer = new ElapsedTime();
+    ElapsedTime spinTime = new ElapsedTime();
+    ElapsedTime driveTime = new ElapsedTime();
+    ElapsedTime shootTime = new ElapsedTime();
 
     /*
      * TECH TIP: State Machines
@@ -101,6 +106,12 @@ public class StarterBotTeleopMecanums extends OpMode {
      * We can use higher level code to cycle through these states. But this allows us to write
      * functions and autonomous routines in a way that avoids loops within loops, and "waits".
      */
+    private enum AutoState {
+        Move,
+        Shoot,
+        Stop,
+    }
+
     private enum LaunchState {
         IDLE,
         SPIN_UP,
@@ -108,19 +119,26 @@ public class StarterBotTeleopMecanums extends OpMode {
         LAUNCHING,
     }
 
+    private final double SHOOT_TIME_DELAY = 0.7;
     private LaunchState launchState;
 
+    private AutoState autoState;
+
     // Setup a variable for each drive wheel to save power level for telemetry
-    double leftFrontPower;
-    double rightFrontPower;
-    double leftBackPower;
-    double rightBackPower;
+    double leftPower;
+    double rightPower;
+    
+    double axis = 1.0;
+    
+    private boolean isRed = true;
+    private boolean startShoot = false;
 
     /*
      * Code to run ONCE when the driver hits INIT
      */
     @Override
     public void init() {
+        autoState = AutoState.Shoot;
         launchState = LaunchState.IDLE;
 
         /*
@@ -128,13 +146,11 @@ public class StarterBotTeleopMecanums extends OpMode {
          * to 'get' must correspond to the names assigned during the robot configuration
          * step.
          */
-        leftFrontDrive = hardwareMap.get(DcMotor.class, "leftFrontDrive");
-        rightFrontDrive = hardwareMap.get(DcMotor.class, "rightFrontDrive");
-        leftBackDrive = hardwareMap.get(DcMotor.class, "leftBackDrive");
-        rightBackDrive = hardwareMap.get(DcMotor.class, "rightBackDrive");
+        leftDrive = hardwareMap.get(DcMotor.class, "backLeftMotor");
+        rightDrive = hardwareMap.get(DcMotor.class, "backRightMotor");
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
-        leftFeeder = hardwareMap.get(CRServo.class, "leftFeeder");
-        rightFeeder = hardwareMap.get(CRServo.class, "rightFeeder");
+        leftFeeder = hardwareMap.get(CRServo.class, "left_feeder");
+        rightFeeder = hardwareMap.get(CRServo.class, "right_feeder");
 
         /*
          * To drive forward, most robots need the motor on one side to be reversed,
@@ -143,10 +159,8 @@ public class StarterBotTeleopMecanums extends OpMode {
          * Note: The settings here assume direct drive on left and right wheels. Gear
          * Reduction or 90 Deg drives may require direction flips
          */
-        leftFrontDrive.setDirection(DcMotor.Direction.REVERSE);
-        rightFrontDrive.setDirection(DcMotor.Direction.FORWARD);
-        leftBackDrive.setDirection(DcMotor.Direction.REVERSE);
-        rightBackDrive.setDirection(DcMotor.Direction.FORWARD);
+        leftDrive.setDirection(DcMotor.Direction.REVERSE);
+        rightDrive.setDirection(DcMotor.Direction.FORWARD);
 
         /*
          * Here we set our launcher to the RUN_USING_ENCODER runmode.
@@ -162,10 +176,8 @@ public class StarterBotTeleopMecanums extends OpMode {
          * slow down much faster when it is coasting. This creates a much more controllable
          * drivetrain. As the robot stops much quicker.
          */
-        leftFrontDrive.setZeroPowerBehavior(BRAKE);
-        rightFrontDrive.setZeroPowerBehavior(BRAKE);
-        leftBackDrive.setZeroPowerBehavior(BRAKE);
-        rightBackDrive.setZeroPowerBehavior(BRAKE);
+        leftDrive.setZeroPowerBehavior(BRAKE);
+        rightDrive.setZeroPowerBehavior(BRAKE);
         launcher.setZeroPowerBehavior(BRAKE);
 
         /*
@@ -193,6 +205,28 @@ public class StarterBotTeleopMecanums extends OpMode {
      */
     @Override
     public void init_loop() {
+        telemetry.addData("Press A", "For Blue");
+        telemetry.addData("Press B", "For Red");
+        telemetry.addData("Press X", "For start shoot");
+        telemetry.addData("Press Y", "For start move");
+        telemetry.addData("Current Selected", isRed ? "RED" : "BLUE");
+        telemetry.addData("Start shoot", startShoot);
+
+        if (startShoot) {
+            autoState = AutoState.Shoot;
+        } else {
+            autoState = AutoState.Move;
+        }
+        
+        if (gamepad1.b) {
+            isRed = true;
+        } else if (gamepad1.a) {
+            isRed = false;
+        } else if (gamepad1.x) {
+            startShoot = true;
+        } else if (gamepad1.y) {
+            startShoot = false;
+        }
     }
 
     /*
@@ -200,11 +234,14 @@ public class StarterBotTeleopMecanums extends OpMode {
      */
     @Override
     public void start() {
+        driveTime.reset();
     }
 
     /*
      * Code to run REPEATEDLY after the driver hits START but before they hit STOP
      */
+
+    private int shootCount = 0;
     @Override
     public void loop() {
         /*
@@ -216,29 +253,41 @@ public class StarterBotTeleopMecanums extends OpMode {
          * both motors work to rotate the robot. Combinations of these inputs can be used to create
          * more complex maneuvers.
          */
-        mecanumDrive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x);
-
-        /*
-         * Here we give the user control of the speed of the launcher motor without automatically
-         * queuing a shot.
-         */
-        if (gamepad1.y) {
-            launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
-        } else if (gamepad1.b) { // stop flywheel
-            launcher.setVelocity(STOP_SPEED);
+        switch (autoState) {
+            case Shoot:
+                if (shootTime.seconds() >= SHOOT_TIME_DELAY) {
+                    launch(true);
+                    shootTime.reset();
+                    if (shootCount >= 3) {
+                        autoState = AutoState.Move;
+                        driveTime.reset();
+                    }
+                }
+                break;
+            case Move:
+                if (driveTime.seconds() < DRIVE_TIME_SECONDS)
+                    arcadeDrive(FULL_SPEED, 0);
+                 else
+                    autoState = AutoState.Stop;
+            case Stop:
+                leftDrive.setPower(0);
+                rightDrive.setPower(0);
+                break;
         }
 
-        /*
-         * Now we call our "Launch" function.
-         */
-        launch(gamepad1.rightBumperWasPressed());
+        LAUNCHER_TARGET_VELOCITY += gamepad1.left_stick_x;
+        LAUNCHER_MIN_VELOCITY += gamepad1.right_stick_x;
 
         /*
          * Show the state and motor powers
          */
-        telemetry.addData("State", launchState);
+        telemetry.addData("State", autoState);
+        telemetry.addData("Motors", "left (%.2f), right (%.2f)", leftPower, rightPower);
         telemetry.addData("motorSpeed", launcher.getVelocity());
-
+        telemetry.addData("direction", axis > 0 ? "front" : "back");
+        telemetry.addData("launcher target velocity", LAUNCHER_TARGET_VELOCITY);
+        telemetry.addData("launcher min velocity", LAUNCHER_MIN_VELOCITY);
+        telemetry.addData("move time", driveTime.seconds());
     }
 
     /*
@@ -247,25 +296,30 @@ public class StarterBotTeleopMecanums extends OpMode {
     @Override
     public void stop() {
     }
+    
+    void spin() {
+        spinTime.reset();
+        while (true) {
+            if (spinTime.seconds() > SPIN_TIME_SECONDS) {
+                break;
+            }
+            arcadeDrive(-0.01, SPIN_SPEED);
+        }
+        axis = -axis;
+    }
 
-    void mecanumDrive(double forward, double strafe, double rotate){
+    void arcadeDrive(double forward, double rotate) {
+        if (forward < 0) {
+            forward /= 1.2;
+        }
+        leftPower = (forward * axis) + (rotate / 2);
+        rightPower = (forward * axis) - (rotate / 2);
 
-        /* the denominator is the largest motor power (absolute value) or 1
-         * This ensures all the powers maintain the same ratio,
-         * but only if at least one is out of the range [-1, 1]
+        /*
+         * Send calculated power to wheels
          */
-        double denominator = Math.max(Math.abs(forward) + Math.abs(strafe) + Math.abs(rotate), 1);
-
-        leftFrontPower = (forward + strafe + rotate) / denominator;
-        rightFrontPower = (forward - strafe - rotate) / denominator;
-        leftBackPower = (forward - strafe + rotate) / denominator;
-        rightBackPower = (forward + strafe - rotate) / denominator;
-
-        leftFrontDrive.setPower(leftFrontPower);
-        rightFrontDrive.setPower(rightFrontPower);
-        leftBackDrive.setPower(leftBackPower);
-        rightBackDrive.setPower(rightBackPower);
-
+        leftDrive.setPower(leftPower);
+        rightDrive.setPower(rightPower);
     }
 
     void launch(boolean shotRequested) {
@@ -282,8 +336,8 @@ public class StarterBotTeleopMecanums extends OpMode {
                 }
                 break;
             case LAUNCH:
-                leftFeeder.setPower(FULL_SPEED);
-                rightFeeder.setPower(FULL_SPEED);
+                leftFeeder.setPower(-FULL_SPEED);
+                rightFeeder.setPower(-FULL_SPEED);
                 feederTimer.reset();
                 launchState = LaunchState.LAUNCHING;
                 break;
@@ -292,6 +346,7 @@ public class StarterBotTeleopMecanums extends OpMode {
                     launchState = LaunchState.IDLE;
                     leftFeeder.setPower(STOP_SPEED);
                     rightFeeder.setPower(STOP_SPEED);
+                    shootCount++;
                 }
                 break;
         }
