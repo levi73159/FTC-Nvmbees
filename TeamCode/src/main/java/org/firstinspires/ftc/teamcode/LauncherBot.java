@@ -76,8 +76,11 @@ public class LauncherBot extends OpMode {
      * velocity. Here we are setting the target, and minimum velocity that the launcher should run
      * at. The minimum velocity is a threshold for determining when to fire.
      */
-    final double LAUNCHER_TARGET_VELOCITY = 1200;
-    final double LAUNCHER_MIN_VELOCITY = 1176;
+    final double LAUNCHER_TARGET_VELOCITY = 1300;
+    final double LAUNCHER_MIN_VELOCITY = 1240;
+
+    final double LAUNCHER_FAR_TARGET_VELOCITY = LAUNCHER_TARGET_VELOCITY + 300;
+    final double LAUNCHER_FAR_MIN_VELOCITY = LAUNCHER_MIN_VELOCITY + 300;
 
     final double LAUNCHER_OFF_VELOCITY = 500;
 
@@ -90,7 +93,10 @@ public class LauncherBot extends OpMode {
     private DcMotorEx launcher = null;
     private CRServo leftFeeder = null;
     private CRServo rightFeeder = null;
+    private CRServo leftIntake = null;
+    private CRServo rightIntake = null;
     private Servo restrictorArm = null;
+
 
     private final double FULL_EXTEND = 0.9;
 
@@ -99,6 +105,9 @@ public class LauncherBot extends OpMode {
     ElapsedTime feederTimer = new ElapsedTime();
     ElapsedTime spinTime = new ElapsedTime();
     ElapsedTime setupTime = new ElapsedTime();
+    ElapsedTime buttonTime = new ElapsedTime();
+
+    private final double BUTTON_TIMEOUT = 0.3;
 
     /*
      * TECH TIP: State Machines
@@ -146,15 +155,17 @@ public class LauncherBot extends OpMode {
          * to 'get' must correspond to the names assigned during the robot configuration
          * step.
          */
-        leftFrontDrive = super.hardwareMap.get(DcMotor.class, "leftFrontDrive");
         rightFrontDrive = super.hardwareMap.get(DcMotor.class, "rightFrontDrive");
         leftBackDrive = super.hardwareMap.get(DcMotor.class, "leftBackDrive");
+        leftFrontDrive = super.hardwareMap.get(DcMotor.class, "leftFrontDrive");
         rightBackDrive = super.hardwareMap.get(DcMotor.class, "rightBackDrive");
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
         leftFeeder = hardwareMap.get(CRServo.class, "leftFeeder");
         rightFeeder = hardwareMap.get(CRServo.class, "rightFeeder");
         restrictorArm = hardwareMap.get(Servo.class, "restrictorArm");
         intake = hardwareMap.get(DcMotor.class, "intake");
+        leftIntake = hardwareMap.get(CRServo.class, "leftIntake");
+        rightIntake = hardwareMap.get(CRServo.class, "rightIntake");
 
         /*
          * To drive forward, most robots need the motor on one side to be reversed,
@@ -206,6 +217,9 @@ public class LauncherBot extends OpMode {
         leftFeeder.setDirection(DcMotorSimple.Direction.FORWARD);
         rightFeeder.setDirection(DcMotorSimple.Direction.REVERSE);
 
+        leftIntake.setDirection(DcMotorSimple.Direction.REVERSE);
+        rightIntake.setDirection(DcMotorSimple.Direction.FORWARD);
+
         /*
          * Tell the driver that initialization is complete.
          */
@@ -226,9 +240,8 @@ public class LauncherBot extends OpMode {
     public void start() {
     }
 
-    /*
-     * Code to run REPEATEDLY after the driver hits START but before they hit STOP
-     */
+    private boolean upPress = false;
+    private boolean downPress = false;
     @Override
     public void loop() {
         /*
@@ -247,35 +260,66 @@ public class LauncherBot extends OpMode {
          * queuing a shot.
          */
         if (gamepad1.y) {
-            launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
-        } else if (gamepad1.b) { // stop flywheel
-            launcher.setVelocity(STOP_SPEED);
+            launch(true, true);
+        }
+
+        if (gamepad1.b) {
+            launcher.setVelocity(-LAUNCHER_MIN_VELOCITY);
         }
         
         if (gamepad1.left_bumper) {
             intake.setPower(-1.0);
+            leftIntake.setPower(-1.0);
+            rightIntake.setPower(-1.0);
         } else if (gamepad1.left_trigger > 0.4) {
             intake.setPower(1.0);
+            leftIntake.setPower(1.0);
+            rightIntake.setPower(1.0);
+        }
+
+        if (gamepad1.dpadUpWasPressed()) {
+            if (leftFeeder.getPower() >= 1.0) {
+                leftFeeder.setPower(0.0);
+                rightFeeder.setPower(0.0);
+            } else {
+                leftFeeder.setPower(1.0);
+                rightFeeder.setPower(1.0);
+            }
+        }
+
+        if (gamepad1.yWasPressed())
+
+        if (gamepad1.dpadDownWasPressed()) {
+            if (leftFeeder.getPower() <= -1.0) {
+                leftFeeder.setPower(0.0);
+                rightFeeder.setPower(0.0);
+            } else {
+                leftFeeder.setPower(-1.0);
+                rightFeeder.setPower(-1.0);
+            }
+        }
+
+        if (gamepad1.dpad_left) {
+            leftFeeder.setPower(0);
+            rightFeeder.setPower(0);
         }
 
         if (gamepad1.a) {
             intake.setPower(0.0);
+            leftIntake.setPower(0.0);
+            rightIntake.setPower(0.0);
         }
 
-        if (gamepad1.x && spinTime.seconds() > 0.1) {
-            spinTime.reset();
-            isOpen = !isOpen;
-            if (isOpen) {
-                restrictorArm.setPosition(0.0);
-            } else {
-                restrictorArm.setPosition(FULL_EXTEND);
+        if (gamepad1.xWasPressed()) {
+            if (launchState == LaunchState.IDLE) {
+                launchState = LaunchState.SETUP;
             }
         }
 
         /*
          * Now we call our "Launch" function.
          */
-        launch(gamepad1.rightBumperWasPressed());
+        launch(gamepad1.rightBumperWasPressed(), false);
 
         /*
          * Show the state and motor powers
@@ -338,16 +382,20 @@ public class LauncherBot extends OpMode {
     }
 
 
-    void launch(boolean shotRequested) {
+    private boolean _launchFar = false;
+    void launch(boolean shotRequested, boolean far) {
+        double targetVelocity = _launchFar ? LAUNCHER_FAR_TARGET_VELOCITY : LAUNCHER_TARGET_VELOCITY;
+        double minVelocity = _launchFar ? LAUNCHER_FAR_MIN_VELOCITY : LAUNCHER_MIN_VELOCITY;
         switch (launchState) {
             case IDLE:
                 if (shotRequested) {
                     launchState = LaunchState.SPIN_UP;
+                    _launchFar = far;
                 }
                 break;
             case SPIN_UP:
-                launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
-                if (launcher.getVelocity() > LAUNCHER_MIN_VELOCITY) {
+                launcher.setVelocity(targetVelocity);
+                if (launcher.getVelocity() > minVelocity) {
                     launchState = LaunchState.LAUNCH;
                 }
                 break;
@@ -371,15 +419,13 @@ public class LauncherBot extends OpMode {
                 while (launcher.getVelocity() > LAUNCHER_OFF_VELOCITY) {
                     ;
                 }
-                restrictorArm.setPosition(0);
-                isOpen = true;
                 feederTimer.reset();
+                intake.setPower(-0.75);
                 while (true) {
-                    if (feederTimer.seconds() > SETUP_TIME_SECOND)
+                    if (feederTimer.seconds() > 0.2)
                         break;
                 }
-                restrictorArm.setPosition(FULL_EXTEND);
-                isOpen = false;
+                intake.setPower(0.0);
                 launchState = LaunchState.IDLE;
         }
     }

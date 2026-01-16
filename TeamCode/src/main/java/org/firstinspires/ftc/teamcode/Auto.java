@@ -6,7 +6,7 @@
  * are permitted (subject to the limitations in the disclaimer below) provided that
  * the following conditions are met:
  *
- * Redistributions of source code must retain the above copyright notice, this list
+ * Redistributions of source code must eetain the above copyright notice, this list
  * of conditions and the following disclaimer.
  *
  * Redistributions in binary form must reproduce the above copyright notice, this
@@ -34,6 +34,9 @@ package org.firstinspires.ftc.teamcode;
 
 import static com.qualcomm.robotcore.hardware.DcMotor.ZeroPowerBehavior.BRAKE;
 
+import android.provider.MediaStore;
+
+import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
@@ -41,6 +44,7 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
+import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 /*
@@ -58,12 +62,18 @@ import com.qualcomm.robotcore.util.ElapsedTime;
  * we will also need to adjust the "PIDF" coefficients with some that are a better fit for our application.
  */
 
-@TeleOp(name = "TestTelop", group = "StarterBot")
+@Autonomous(name = "Auto")
 //@Disabled
-public class TestTelop extends OpMode {
-    final double FEED_TIME_SECONDS = 0.20; //The feeder servos run this long when a shot is requested.
+public class Auto extends OpMode {
+    final double FEED_TIME_SECONDS = 0.2; //The feeder servos run this long when a shot is requested.
+    final double SETUP_TIME_SECOND = 0.3;
     final double STOP_SPEED = 0.0; //We send this power to the servos when we want them to stop.
-    final double FULL_SPEED = 1.0;
+    final double FULL_SPEED = 0.6;
+    final double MOVE_BACK_TIME = 0.3;
+    final double MOVE_OUT_TIME = 1.0;
+
+    final double SPIN_SPEED = 1;
+    final double SPIN_TIME_SECONDS = 0.5;
 
     /*
      * When we control our launcher motor, we are using encoders. These allow the control system
@@ -71,17 +81,43 @@ public class TestTelop extends OpMode {
      * velocity. Here we are setting the target, and minimum velocity that the launcher should run
      * at. The minimum velocity is a threshold for determining when to fire.
      */
-    final double LAUNCHER_TARGET_VELOCITY = 1125;
-    final double LAUNCHER_MIN_VELOCITY = 1075;
+    final double LAUNCHER_TARGET_VELOCITY = 1300;
+    final double LAUNCHER_MIN_VELOCITY = 1240;
+
+    final double LAUNCHER_FAR_TARGET_VELOCITY = LAUNCHER_TARGET_VELOCITY + 300;
+    final double LAUNCHER_FAR_MIN_VELOCITY = LAUNCHER_MIN_VELOCITY + 300;
+
+    final double LAUNCHER_OFF_VELOCITY = 500;
 
     // Declare OpMode members.
-    private DcMotor leftDrive = null;
-    private DcMotor rightDrive = null;
+    private DcMotor leftFrontDrive = null;
+    private DcMotor rightFrontDrive = null;
+    private DcMotor leftBackDrive = null;
+    private DcMotor rightBackDrive = null;
+    private DcMotor intake = null;
     private DcMotorEx launcher = null;
     private CRServo leftFeeder = null;
     private CRServo rightFeeder = null;
+    private CRServo leftIntake = null;
+    private CRServo rightIntake = null;
+    private Servo restrictorArm = null;
+
+
+    private final double FULL_EXTEND = 0.9;
+
+
 
     ElapsedTime feederTimer = new ElapsedTime();
+    ElapsedTime spinTime = new ElapsedTime();
+    ElapsedTime moveTime = new ElapsedTime();
+
+    private enum TeamColor {
+        RED,
+        BLUE,
+    }
+
+    private final double BUTTON_TIMEOUT = 0.3;
+    private TeamColor color = TeamColor.RED;
 
     /*
      * TECH TIP: State Machines
@@ -104,13 +140,26 @@ public class TestTelop extends OpMode {
         SPIN_UP,
         LAUNCH,
         LAUNCHING,
+        SETUP,
+    }
+
+    private enum AutoState {
+        MOVE_BACK,
+        SHOOT,
+        MOVE_OUT,
+        IDLE,
     }
 
     private LaunchState launchState;
+    private AutoState autoState;
 
     // Setup a variable for each drive wheel to save power level for telemetry
     double leftPower;
     double rightPower;
+
+    private boolean isOpen = false;
+    
+    double axis = 1.0;
 
     /*
      * Code to run ONCE when the driver hits INIT
@@ -118,17 +167,24 @@ public class TestTelop extends OpMode {
     @Override
     public void init() {
         launchState = LaunchState.IDLE;
+        autoState = AutoState.MOVE_BACK;
 
         /*
          * Initialize the hardware variables. Note that the strings used here as parameters
          * to 'get' must correspond to the names assigned during the robot configuration
          * step.
          */
-        leftDrive = hardwareMap.get(DcMotor.class, "left_drive");
-        rightDrive = hardwareMap.get(DcMotor.class, "right_drive");
+        rightFrontDrive = super.hardwareMap.get(DcMotor.class, "rightFrontDrive");
+        leftBackDrive = super.hardwareMap.get(DcMotor.class, "leftBackDrive");
+        leftFrontDrive = super.hardwareMap.get(DcMotor.class, "leftFrontDrive");
+        rightBackDrive = super.hardwareMap.get(DcMotor.class, "rightBackDrive");
         launcher = hardwareMap.get(DcMotorEx.class, "launcher");
-        leftFeeder = hardwareMap.get(CRServo.class, "left_feeder");
-        rightFeeder = hardwareMap.get(CRServo.class, "right_feeder");
+        leftFeeder = hardwareMap.get(CRServo.class, "leftFeeder");
+        rightFeeder = hardwareMap.get(CRServo.class, "rightFeeder");
+        restrictorArm = hardwareMap.get(Servo.class, "restrictorArm");
+        intake = hardwareMap.get(DcMotor.class, "intake");
+        leftIntake = hardwareMap.get(CRServo.class, "leftIntake");
+        rightIntake = hardwareMap.get(CRServo.class, "rightIntake");
 
         /*
          * To drive forward, most robots need the motor on one side to be reversed,
@@ -137,8 +193,12 @@ public class TestTelop extends OpMode {
          * Note: The settings here assume direct drive on left and right wheels. Gear
          * Reduction or 90 Deg drives may require direction flips
          */
-        leftDrive.setDirection(DcMotor.Direction.REVERSE);
-        rightDrive.setDirection(DcMotor.Direction.FORWARD);
+
+        // 0.8 fully ingage motor
+        leftFrontDrive.setDirection(DcMotorSimple.Direction.FORWARD);
+        rightFrontDrive.setDirection(DcMotorSimple.Direction.REVERSE);
+        leftBackDrive.setDirection(DcMotorSimple.Direction.FORWARD);
+        rightBackDrive.setDirection(DcMotorSimple.Direction.FORWARD);
 
         /*
          * Here we set our launcher to the RUN_USING_ENCODER runmode.
@@ -154,8 +214,10 @@ public class TestTelop extends OpMode {
          * slow down much faster when it is coasting. This creates a much more controllable
          * drivetrain. As the robot stops much quicker.
          */
-        leftDrive.setZeroPowerBehavior(BRAKE);
-        rightDrive.setZeroPowerBehavior(BRAKE);
+        leftFrontDrive.setZeroPowerBehavior(BRAKE);
+        rightFrontDrive.setZeroPowerBehavior(BRAKE);
+        leftBackDrive.setZeroPowerBehavior(BRAKE);
+        rightBackDrive.setZeroPowerBehavior(BRAKE);
         launcher.setZeroPowerBehavior(BRAKE);
 
         /*
@@ -165,12 +227,17 @@ public class TestTelop extends OpMode {
         rightFeeder.setPower(STOP_SPEED);
 
         launcher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(300, 0, 0, 10));
+        restrictorArm.setPosition(0.0);
 
         /*
          * Much like our drivetrain motors, we set the left feeder servo to reverse so that they
          * both work to feed the ball into the robot.
          */
-        leftFeeder.setDirection(DcMotorSimple.Direction.REVERSE);
+        leftFeeder.setDirection(DcMotorSimple.Direction.FORWARD);
+        rightFeeder.setDirection(DcMotorSimple.Direction.REVERSE);
+
+        leftIntake.setDirection(DcMotorSimple.Direction.REVERSE);
+        rightIntake.setDirection(DcMotorSimple.Direction.FORWARD);
 
         /*
          * Tell the driver that initialization is complete.
@@ -183,6 +250,14 @@ public class TestTelop extends OpMode {
      */
     @Override
     public void init_loop() {
+        if (gamepad1.xWasPressed()) {
+            color = TeamColor.BLUE;
+        }
+        if (gamepad1.bWasPressed()) {
+            color = TeamColor.RED;
+        }
+        telemetry.clear();
+        telemetry.addData("Team Color: ", color);
     }
 
     /*
@@ -192,44 +267,58 @@ public class TestTelop extends OpMode {
     public void start() {
     }
 
-    /*
-     * Code to run REPEATEDLY after the driver hits START but before they hit STOP
-     */
+    private boolean _start = false;
     @Override
     public void loop() {
-        /*
-         * Here we call a function called arcadeDrive. The arcadeDrive function takes the input from
-         * the joysticks, and applies power to the left and right drive motor to move the robot
-         * as requested by the driver. "arcade" refers to the control style we're using here.
-         * Much like a classic arcade game, when you move the left joystick forward both motors
-         * work to drive the robot forward, and when you move the right joystick left and right
-         * both motors work to rotate the robot. Combinations of these inputs can be used to create
-         * more complex maneuvers.
-         */
-        arcadeDrive(-gamepad1.left_stick_y, gamepad1.right_stick_x);
-
-        /*
-         * Here we give the user control of the speed of the launcher motor without automatically
-         * queuing a shot.
-         */
-        if (gamepad1.y) {
-            launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
-        } else if (gamepad1.b) { // stop flywheel
-            launcher.setVelocity(STOP_SPEED);
+        if (!_start) {
+            feederTimer.reset();
+            intake.setPower(-0.75);
+            while (true) {
+                if (feederTimer.seconds() > 0.2)
+                    break;
+            }
+            intake.setPower(0.0);
+            moveTime.reset();
+            while (true) {
+                if (moveTime.seconds() > 0.2) {
+                    break;
+                }
+            }
+            moveTime.reset();
+            _start = true;
+        }
+        switch (autoState) {
+            case MOVE_BACK:
+                mecanumDrive(0.8, 0, 0);
+                if (moveTime.seconds() > MOVE_BACK_TIME) {
+                    mecanumDrive(0, 0, 0);
+                    autoState = AutoState.SHOOT;
+                }
+                break;
+            case SHOOT:
+                if (_amountLaunch >= 3) {
+                    autoState = AutoState.MOVE_OUT;
+                    moveTime.reset();
+                } else {
+                    launch(true, false);
+                }
+                break;
+            case MOVE_OUT:
+                mecanumDrive(0.4, color == TeamColor.RED ? -0.5 : 0.5, 0);
+                if (moveTime.seconds() > MOVE_OUT_TIME) {
+                    mecanumDrive(0, 0, 0);
+                    autoState = AutoState.IDLE;
+                }
+                break;
+            case IDLE:
+                mecanumDrive(0, 0, 0);
+                break; // does nothing
         }
 
-        /*
-         * Now we call our "Launch" function.
-         */
-        launch(gamepad1.rightBumperWasPressed());
-
-        /*
-         * Show the state and motor powers
-         */
         telemetry.addData("State", launchState);
         telemetry.addData("Motors", "left (%.2f), right (%.2f)", leftPower, rightPower);
         telemetry.addData("motorSpeed", launcher.getVelocity());
-        telemetry.addData("Hello", "world");
+        telemetry.addData("direction", axis > 0 ? "front" : "back");
     }
 
     /*
@@ -238,44 +327,99 @@ public class TestTelop extends OpMode {
     @Override
     public void stop() {
     }
+    
+    void spin() {
+        spinTime.reset();
+        while (true) {
+            if (spinTime.seconds() > SPIN_TIME_SECONDS) {
+                break;
+            }
+            arcadeDrive(-0.01, SPIN_SPEED);
+        }
+        axis = -axis;
+    }
 
     void arcadeDrive(double forward, double rotate) {
-        leftPower = forward + rotate;
-        rightPower = forward - rotate;
+        if (forward < 0) {
+            forward /= 1.2;
+        }
+        leftPower = (forward * axis) + (rotate / 2);
+        rightPower = (forward * axis) - (rotate / 2);
 
         /*
          * Send calculated power to wheels
          */
-        leftDrive.setPower(leftPower);
-        rightDrive.setPower(rightPower);
+        rightBackDrive.setPower(leftPower);
+        leftBackDrive.setPower(rightPower);
     }
 
-    void launch(boolean shotRequested) {
+    void mecanumDrive(double forward, double strafe, double rotate) {
+        /* the denominator is the largest motor power (absolute value) or 1
+         * This ensures all the powers maintain the same ratio,
+         * but only if at least one is out of the range [-1, 1]
+         */
+
+        double denominator = Math.max(Math.abs(forward) + Math.abs(strafe) + Math.abs(rotate), 1.0);
+
+        double frontLeft = (-forward + strafe + rotate) / denominator;
+        double frontRight = (-forward - strafe - rotate) / denominator;
+        double backLeft = (-forward - strafe + rotate) / denominator;
+        double backRight = (-forward + strafe - rotate) / denominator;
+
+        leftFrontDrive.setPower(frontLeft);
+        rightFrontDrive.setPower(frontRight);
+        leftBackDrive.setPower(backLeft);
+        rightBackDrive.setPower(backRight);
+    }
+
+
+    private boolean _launchFar = false;
+    private int _amountLaunch = 0;
+    void launch(boolean shotRequested, boolean far) {
+        double targetVelocity = _launchFar ? LAUNCHER_FAR_TARGET_VELOCITY : LAUNCHER_TARGET_VELOCITY;
+        double minVelocity = _launchFar ? LAUNCHER_FAR_MIN_VELOCITY : LAUNCHER_MIN_VELOCITY;
         switch (launchState) {
             case IDLE:
                 if (shotRequested) {
                     launchState = LaunchState.SPIN_UP;
+                    _launchFar = far;
                 }
                 break;
             case SPIN_UP:
-                launcher.setVelocity(LAUNCHER_TARGET_VELOCITY);
-                if (launcher.getVelocity() > LAUNCHER_MIN_VELOCITY) {
+                launcher.setVelocity(targetVelocity);
+                if (launcher.getVelocity() > minVelocity) {
                     launchState = LaunchState.LAUNCH;
                 }
                 break;
             case LAUNCH:
-                leftFeeder.setPower(FULL_SPEED);
-                rightFeeder.setPower(FULL_SPEED);
+                leftFeeder.setPower(-1);
+                rightFeeder.setPower(-1);
+                intake.setPower(1.0);
                 feederTimer.reset();
                 launchState = LaunchState.LAUNCHING;
                 break;
             case LAUNCHING:
                 if (feederTimer.seconds() > FEED_TIME_SECONDS) {
-                    launchState = LaunchState.IDLE;
+                    launchState = LaunchState.SETUP;
                     leftFeeder.setPower(STOP_SPEED);
                     rightFeeder.setPower(STOP_SPEED);
+                    intake.setPower(STOP_SPEED);
                 }
                 break;
+            case SETUP:
+                launcher.setVelocity(STOP_SPEED);
+                while (launcher.getVelocity() > LAUNCHER_OFF_VELOCITY) {
+                    ;
+                }
+                feederTimer.reset();
+                intake.setPower(-0.75);
+                while (true) {
+                    if (feederTimer.seconds() > 0.2)
+                        break;
+                }
+                intake.setPower(0.0);
+                launchState = LaunchState.IDLE;
+                _amountLaunch++;
         }
     }
 }

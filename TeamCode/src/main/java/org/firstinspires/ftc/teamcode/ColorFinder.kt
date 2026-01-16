@@ -289,7 +289,7 @@ class ColorFinder : OpMode() {
     }
 
     var oldBlobContourArea: Int = -1;
-/*    fun findBall() {
+    fun findBall() {
         super.telemetry.addLine("Searching for ball")
         if (ballFinder == null) {
             super.telemetry.addLine("Warning! Ball processor not enabled!")
@@ -349,7 +349,7 @@ class ColorFinder : OpMode() {
         }
 
         if (oldBlobContourArea > 20_000 && _beenOutFrame && _timeSearching.seconds() < maxTimeSearch && _direction == Direction.CENTER) {
-            _roboState = RobotState.IntakeBall;
+//            _roboState = RobotState.IntakeBall;
             return;
         } else {
             mecanumDrive(if (_direction == Direction.CENTER && biggestBlob != null) 0.4 else 0.0, 0.0, rotate)
@@ -359,7 +359,7 @@ class ColorFinder : OpMode() {
             _direction = Direction.CENTER
 
         super.telemetry.addData("Position", _direction)
-    }*/
+    }
 
     fun ballCollected() {
         _ballNumber ++
