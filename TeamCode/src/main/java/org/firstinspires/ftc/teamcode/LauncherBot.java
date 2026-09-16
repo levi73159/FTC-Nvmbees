@@ -62,7 +62,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 @TeleOp(name = "LauncherBot")
 //@Disabled
 public class LauncherBot extends OpMode {
-    final double FEED_TIME_SECONDS = 0.2; //The feeder servos run this long when a shot is requested.
+    final double FEED_TIME_SECONDS = 0.3; //The feeder servos run this long when a shot is requested.
     final double SETUP_TIME_SECOND = 0.3;
     final double STOP_SPEED = 0.0; //We send this power to the servos when we want them to stop.
     final double FULL_SPEED = 0.6;
@@ -76,10 +76,13 @@ public class LauncherBot extends OpMode {
      * velocity. Here we are setting the target, and minimum velocity that the launcher should run
      * at. The minimum velocity is a threshold for determining when to fire.
      */
-    final double LAUNCHER_TARGET_VELOCITY = 1300;
-    final double LAUNCHER_MIN_VELOCITY = 1240;
+    final double LAUNCHER_TARGET_VELOCITY = 1300 + 300;
+    final double LAUNCHER_MIN_VELOCITY = 1240 + 300;
 
-    final double LAUNCHER_FAR_TARGET_VELOCITY = LAUNCHER_TARGET_VELOCITY + 300;
+//    final double LAUNCHER_FAR_TARGET_VELOCITY = LAUNCHER_TARGET_VELOCITY + 1000;
+//    final double LAUNCHER_FAR_MIN_VELOCITY = LAUNCHER_MIN_VELOCITY + 1000;
+
+    final double LAUNCHER_FAR_TARGET_VELOCITY = LAUNCHER_TARGET_VELOCITY + 600;
     final double LAUNCHER_FAR_MIN_VELOCITY = LAUNCHER_MIN_VELOCITY + 300;
 
     final double LAUNCHER_OFF_VELOCITY = 500;
@@ -422,7 +425,7 @@ public class LauncherBot extends OpMode {
                 feederTimer.reset();
                 intake.setPower(-0.75);
                 while (true) {
-                    if (feederTimer.seconds() > 0.2)
+                    if (feederTimer.seconds() > 0.3)
                         break;
                 }
                 intake.setPower(0.0);

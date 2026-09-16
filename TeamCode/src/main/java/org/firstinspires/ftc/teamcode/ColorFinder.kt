@@ -3,6 +3,7 @@ package org.firstinspires.ftc.teamcode
 import android.graphics.Color
 import android.util.Size
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous
+import com.qualcomm.robotcore.eventloop.opmode.Disabled
 import com.qualcomm.robotcore.eventloop.opmode.OpMode
 import com.qualcomm.robotcore.hardware.CRServo
 import com.qualcomm.robotcore.hardware.DcMotor
@@ -29,6 +30,7 @@ typealias LocatorBuilder = ColorBlobLocatorProcessor.Builder
 typealias ContourMode = ColorBlobLocatorProcessor.ContourMode
 
 @Autonomous(name = "Color Finder")
+@Disabled
 class ColorFinder : OpMode() {
     enum class Direction {
         LEFT,
